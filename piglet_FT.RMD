@@ -1,0 +1,725 @@
+---
+title: "Fecal transplantation piglet project"
+author: "Ming Yan"
+output: 
+  html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+    theme: flatly
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(message = FALSE)
+knitr::opts_chunk$set(warning = FALSE)
+```
+
+
+
+# Load the libraries 
+
+```{r}
+library(tidyverse)
+library(stringr)
+library(vegan)
+library(phyloseq)
+library(ape)
+library(glue)
+library(ggpubr)
+library(rstatix)
+library(patchwork)
+library(ANCOMBC)
+library(ComplexHeatmap)
+```
+
+# Data import and formating
+
+## Import QIIME2 output and create phyloseq objectives
+
+```{r}
+otu <- read.table(file = "feature-table.tsv", sep = "\t", header = T, row.names = 1, 
+                   comment.char = "")
+taxonomy <- read.table(file = "taxonomy.tsv", sep = "\t", header = T ,row.names = 1)
+tax <- taxonomy %>%
+  select(Taxon) %>% 
+  separate(Taxon, c("Kingdom", "Phylum", "Class", "Order", "Family", "Genus", "Species"), "; ")
+
+
+tax.clean <- data.frame(row.names = row.names(tax),
+                        Kingdom = str_replace(tax[,1], "k__",""),
+                        Phylum = str_replace(tax[,2], "p__",""),
+                        Class = str_replace(tax[,3], "c__",""),
+                        Order = str_replace(tax[,4], "o__",""),
+                        Family = str_replace(tax[,5], "f__",""),
+                        Genus = str_replace(tax[,6], "g__",""),
+                        Species = str_replace(tax[,7], "s__",""),
+                        stringsAsFactors = FALSE)
+
+tax.clean[is.na(tax.clean)] <- ""
+tax.clean[tax.clean=="__"] <- ""
+
+for (i in 1:nrow(tax.clean)){
+  if (tax.clean[i,7] != ""){
+    tax.clean$Species[i] <- paste(tax.clean$Genus[i], tax.clean$Species[i], sep = " ")
+  } else if (tax.clean[i,2] == ""){
+    kingdom <- paste("Unclassified", tax.clean[i,1], sep = " ")
+    tax.clean[i, 2:7] <- kingdom
+  } else if (tax.clean[i,3] == ""){
+    phylum <- paste("Unclassified", tax.clean[i,2], sep = " ")
+    tax.clean[i, 3:7] <- phylum
+  } else if (tax.clean[i,4] == ""){
+    class <- paste("Unclassified", tax.clean[i,3], sep = " ")
+    tax.clean[i, 4:7] <- class
+  } else if (tax.clean[i,5] == ""){
+    order <- paste("Unclassified", tax.clean[i,4], sep = " ")
+    tax.clean[i, 5:7] <- order
+  } else if (tax.clean[i,6] == ""){
+    family <- paste("Unclassified", tax.clean[i,5], sep = " ")
+    tax.clean[i, 6:7] <- family
+  } else if (tax.clean[i,7] == ""){
+    tax.clean$Species[i] <- paste("Unclassified ",tax.clean$Genus[i], sep = " ")
+  }
+}
+
+
+metadata <- read.table(file = "metadata.tsv", sep = "\t", header = T, row.names = 1)
+metadata$'sample.id' <- rownames(metadata)
+
+##rename
+metadata$time <- str_replace(metadata$time, "Pre_inoculation" , "Day0 (Pre-inoculation)")
+metadata$time <- str_replace(metadata$time, "DPC0" , "Day40 (DPC0)")
+metadata$time <- str_replace(metadata$time, "DPC2" , "Day42 (DPC2)")
+metadata$time <- str_replace(metadata$time, "DPC4" , "Day44 (DPC4)")
+metadata$time <- str_replace(metadata$time, "DPC7" , "Day47 (DPC7)")
+
+metadata_con <- metadata %>% filter(Treatment == "Control")
+metadata<- metadata %>% filter(Experiment.id == 2) ## only use data from experiment 2, because immunology data from experiment 2
+colnames(otu) <- str_replace_all(colnames(otu),"X","")
+```
+
+## Build phyloseq objectives
+```{r}
+OTU = otu_table(as.matrix(otu), taxa_are_rows = TRUE)
+TAX = tax_table(as.matrix(tax.clean))
+SAMPLE <- sample_data(metadata)
+SAMPLE_CON <- sample_data(metadata_con)
+ps <- phyloseq(OTU, TAX, SAMPLE)
+ps_control <- phyloseq(OTU, TAX, SAMPLE_CON)
+```
+
+## Rarefaction
+```{r}
+set.seed(111) # keep result reproductive
+ps.rarefied = rarefy_even_depth(ps, rngseed=1, sample.size=4000, replace=F)
+ps.rarefied.con = rarefy_even_depth(ps_control, rngseed=1, sample.size=4000, replace=F)
+
+```
+
+## Format metadata
+```{r}
+meta_stats <- metadata %>% filter(type != "Buffer")
+
+meta_stats <- meta_stats %>% tibble::rownames_to_column("sample-id")
+```
+
+# Alpha diversity
+
+## calculate diversity index
+```{r}
+alpha = estimate_richness(ps.rarefied, measures = c("Observed", "Shannon","Chao1","Shannon","Simpson"))
+rownames(alpha) <- str_replace_all(rownames(alpha),"X","")
+alpha1 <- alpha %>% tibble::rownames_to_column("sample-id")
+alpha_ready <- merge(alpha1,meta_stats, by = "sample-id")
+alpha_fecal <- alpha_ready %>% filter(type == "Fecal") %>% filter(Treatment != 'Control')
+```
+
+## Plot shannon
+```{r}
+# Shannon
+shannon <- alpha_fecal %>% ggplot(aes(x=Treatment, y=Shannon)) + 
+  geom_boxplot() +
+  facet_wrap(~time) +
+  geom_jitter()
+
+shannon <- shannon + theme_classic() +  ## remove panel.border
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        strip.background = element_blank(),
+        panel.border = element_rect(colour = "black", fill = NA)) +
+   labs(x = "") +
+   labs(y = "Shannon")
+
+shannon
+#ggsave('res_ex2/shannon.png', plot = shannon,device = 'png',width = 6, height = 4)
+```
+
+
+## Stats for alpha
+```{r}
+
+# shannon <- alpha_fecal %>% select("Treatment","Shannon","time") %>%  group_by(time) %>% do(w = wilcox.test(data=., Shannon~ Treatment, paired=FALSE)) %>% summarise(time, Wilcox = w$p.value) 
+
+shannon <- alpha_fecal %>% select("Treatment","Shannon","time") %>%  group_by(time) %>% wilcox_test(formula = Shannon~ Treatment, paired=FALSE) %>%
+  add_significance()  
+
+simpson <- alpha_fecal %>% select("Treatment","Simpson","time") %>%  group_by(time) %>% wilcox_test(formula = Simpson~ Treatment, paired=FALSE) %>%
+  add_significance()  
+
+richness <- alpha_fecal %>% select("Treatment","Observed","time") %>%  group_by(time) %>% wilcox_test(formula = Observed~ Treatment, paired=FALSE) %>%
+  add_significance() 
+
+
+
+shannon
+simpson
+richness
+
+```
+*none is different*
+
+# Beta diversity
+
+## PCoA 
+```{r}
+control <- ps.rarefied.con %>% subset_samples(type == 'Fecal')
+ps_fecal_ex2 <- ps.rarefied %>% subset_samples(type == 'Fecal')
+ps_fecal_ex2 <- merge_phyloseq(ps_fecal_ex2,control)
+
+
+bray_ex2 <- phyloseq::distance(ps_fecal_ex2, method="bray")
+
+pcoa_ex2 <- ordinate(ps_fecal_ex2, method="PCoA", distance=bray_ex2)
+ex2 <- plot_ordination(ps_fecal_ex2 , pcoa_ex2, color="Treatment")  + 
+  theme_classic() +
+  theme(strip.background = element_blank()) +
+  facet_wrap(~time, scales="free")
+leg_ex2 <- get_legend(ex2)  # from library "ggpubr"
+  
+fecal_pre_ex2 <- ps_fecal_ex2 %>% subset_samples(time == 'Day0 (Pre-inoculation)')  ## before virus challenge
+bray_pre_ex2 <- phyloseq::distance(fecal_pre_ex2, method="bray") 
+pcoa_pre_ex2 <- ordinate(fecal_pre_ex2, method="PCoA", distance=bray_pre_ex2)
+pre_ex2 <- plot_ordination(fecal_pre_ex2, pcoa_pre_ex2, color="Treatment") + 
+  theme_classic()  + theme(plot.title = element_text(hjust = 0.5)) +labs(title = "Pre-inoculation", x = paste("PC1 [", round(pcoa_pre_ex2$values$Relative_eig[1]*100, 1), "%]",sep = ""),
+    y = paste("PC2 [", round(pcoa_pre_ex2$values$Relative_eig[2]*100, 1), "%]",sep = "")) + theme(legend.position = "none")
+
+
+fecal_22_ex2 <- ps_fecal_ex2 %>% subset_samples(time == 'Day22')  ## before virus challenge
+bray_22_ex2 <- phyloseq::distance(fecal_22_ex2, method="bray") 
+pcoa_22_ex2 <- ordinate(fecal_22_ex2, method="PCoA", distance=bray_22_ex2)
+day_22_ex2 <- plot_ordination(fecal_22_ex2, pcoa_22_ex2, color="Treatment") + 
+  theme_classic()  + theme(legend.position = "none") +labs(title = "Day 22", x = paste("PC1 [", round(pcoa_22_ex2$values$Relative_eig[1]*100, 1), "%]",sep = ""),
+    y = paste("PC2 [", round(pcoa_22_ex2$values$Relative_eig[2]*100, 1), "%]",sep = "")) + 
+  theme(plot.title = element_text(hjust = 0.5))
+
+
+fecal_DPC0_ex2 <- ps_fecal_ex2 %>% subset_samples(time == 'Day40 (DPC0)')  ## before virus challenge
+bray_DPC0_ex2 <- phyloseq::distance(fecal_DPC0_ex2, method="bray") 
+pcoa_DPC0_ex2 <- ordinate(fecal_DPC0_ex2, method="PCoA", distance=bray_DPC0_ex2)
+DPC0_ex2 <-plot_ordination(fecal_DPC0_ex2, pcoa_DPC0_ex2, color="Treatment") + 
+  theme_classic()  + theme(plot.title = element_text(hjust = 0.5),
+    legend.position = "none") +labs(title = "DPC0 (day 40)", x = paste("PC1 [", round(pcoa_22_ex2$values$Relative_eig[1]*100, 1), "%]",sep = ""),
+    y = paste("PC2 [", round(pcoa_22_ex2$values$Relative_eig[2]*100, 1), "%]",sep = ""))
+
+fecal_DPC2_ex2 <- ps_fecal_ex2 %>% subset_samples(time == 'Day42 (DPC2)')  ## before virus challenge
+bray_DPC2_ex2 <- phyloseq::distance(fecal_DPC2_ex2, method="bray") 
+pcoa_DPC2_ex2 <- ordinate(fecal_DPC2_ex2, method="PCoA", distance=bray_DPC2_ex2)
+DPC2_ex2 <- plot_ordination(fecal_DPC2_ex2, pcoa_DPC2_ex2, color="Treatment") + 
+  theme_classic()  + theme(plot.title = element_text(hjust = 0.5),
+    legend.position = "none") +labs(title = "DPC2 (day 42)", x = paste("PC1 [", round(pcoa_DPC2_ex2$values$Relative_eig[1]*100, 1), "%]",sep = ""),
+    y = paste("PC2 [", round(pcoa_DPC2_ex2$values$Relative_eig[2]*100, 1), "%]",sep = ""))
+
+fecal_DPC4_ex2 <- ps_fecal_ex2 %>% subset_samples(time == 'Day44 (DPC4)')  ## before virus challenge
+bray_DPC4_ex2 <- phyloseq::distance(fecal_DPC4_ex2, method="bray") 
+pcoa_DPC4_ex2 <- ordinate(fecal_DPC4_ex2, method="PCoA", distance=bray_DPC4_ex2)
+DPC4_ex2 <- plot_ordination(fecal_DPC4_ex2, pcoa_DPC4_ex2, color="Treatment") + 
+  theme_classic()  + theme(plot.title = element_text(hjust = 0.5),
+    legend.position = "none") +labs(title = "DPC4 (day 44)", x = paste("PC1 [", round(pcoa_DPC4_ex2$values$Relative_eig[1]*100, 1), "%]",sep = ""),
+    y = paste("PC2 [", round(pcoa_DPC4_ex2$values$Relative_eig[2]*100, 1), "%]",sep = ""))
+
+fecal_DPC7_ex2 <- ps_fecal_ex2 %>% subset_samples(time == 'Day47 (DPC7)')  ## before virus challenge
+bray_DPC7_ex2 <- phyloseq::distance(fecal_DPC7_ex2, method="bray") 
+pcoa_DPC7_ex2 <- ordinate(fecal_DPC7_ex2, method="PCoA", distance=bray_DPC7_ex2)
+DPC7_ex2 <- plot_ordination(fecal_DPC7_ex2, pcoa_DPC7_ex2, color="Treatment") + 
+  theme_classic()  + theme(plot.title = element_text(hjust = 0.5),
+    legend.position = "none") +labs(title = "DPC7 (day 47)", x = paste("PC1 [", round(pcoa_DPC7_ex2$values$Relative_eig[1]*100, 1), "%]",sep = ""),
+    y = paste("PC2 [", round(pcoa_DPC7_ex2$values$Relative_eig[2]*100, 1), "%]",sep = ""))
+
+ggarrange(ggarrange(pre_ex2,day_22_ex2, DPC0_ex2,DPC2_ex2,DPC4_ex2,DPC7_ex2),leg_ex2, widths = c(2.5, 0.5),
+          ncol = 2, nrow = 1) 
+
+#ggsave('PCoa_ex2.png', plot = ex2_by_time,device = 'png',width = 12, height = 4)
+```
+
+
+## Add Adonis results as the annotation
+```{r}
+adonis_pre_ex2 <- adonis(phyloseq::distance(fecal_pre_ex2 %>% subset_samples(Treatment %in% c("Rural", "Urban")), method="bray")  ~ Treatment, fecal_pre_ex2 %>% subset_samples(Treatment %in% c("Rural", "Urban")) %>% sample_data() %>% data.frame())
+
+adonis_22_ex2 <- adonis(phyloseq::distance(fecal_22_ex2 %>% subset_samples(Treatment %in% c("Rural", "Urban")), method="bray")  ~ Treatment, fecal_22_ex2 %>% subset_samples(Treatment %in% c("Rural", "Urban")) %>% sample_data() %>% data.frame())
+
+adonis_DPC0_ex2 <- adonis(phyloseq::distance(fecal_DPC0_ex2 %>% subset_samples(Treatment %in% c("Rural", "Urban")), method="bray")  ~ Treatment, fecal_DPC0_ex2 %>% subset_samples(Treatment %in% c("Rural", "Urban")) %>% sample_data() %>% data.frame())
+
+adonis_DPC2_ex2 <- adonis(phyloseq::distance(fecal_DPC2_ex2 %>% subset_samples(Treatment %in% c("Rural", "Urban")), method="bray")  ~ Treatment, fecal_DPC2_ex2 %>% subset_samples(Treatment %in% c("Rural", "Urban")) %>% sample_data() %>% data.frame())
+
+adonis_DPC4_ex2 <- adonis(phyloseq::distance(fecal_DPC4_ex2 %>% subset_samples(Treatment %in% c("Rural", "Urban")), method="bray")  ~ Treatment, fecal_DPC4_ex2 %>% subset_samples(Treatment %in% c("Rural", "Urban")) %>% sample_data() %>% data.frame())
+
+adonis_DPC7_ex2 <- adonis(phyloseq::distance(fecal_DPC7_ex2 %>% subset_samples(Treatment %in% c("Rural", "Urban")), method="bray")  ~ Treatment, fecal_DPC7_ex2 %>% subset_samples(Treatment %in% c("Rural", "Urban")) %>% sample_data() %>% data.frame())
+
+
+pre_ex2_anno <- ggplot() + 
+  annotate("text", x = 2, y = 5, label = paste("Rural vs. Urban: ", adonis_pre_ex2$aov.tab$`Pr(>F)`[1], sep = "") , size = 3) +
+  coord_cartesian(clip = "off") +   # allows text to overflow if needed
+  theme_void()
+
+pre_ex2_final <- pre_ex2 + inset_element(pre_ex2_anno, left = 0.55, bottom = 1.05, right = 0.55, top = 1) # function "inset_element" from library "patchwork" 
+
+
+D22_ex2_anno <- ggplot() + 
+  annotate("text", x = 2, y = 5, label = paste("Rural vs. Urban: ", adonis_22_ex2$aov.tab$`Pr(>F)`[1], sep = "") , size = 3) +
+  coord_cartesian(clip = "off") +   # allows text to overflow if needed
+  theme_void()
+
+D22_ex2_final <- day_22_ex2 + inset_element(D22_ex2_anno, left = 0.55, bottom = 1.05, right = 0.55, top = 1)
+
+
+DPC0_ex2_anno <- ggplot() + 
+  annotate("text", x = 2, y = 5, label = paste("Rural vs. Urban: ", adonis_DPC0_ex2$aov.tab$`Pr(>F)`[1], sep = "") , size = 3) +
+  coord_cartesian(clip = "off") +   # allows text to overflow if needed
+  theme_void()
+
+DPC0_ex2_final <- DPC0_ex2 + inset_element(DPC0_ex2_anno, left = 0.55, bottom = 1.05, right = 0.55, top = 1)
+
+
+DPC2_ex2_anno <- ggplot() + 
+  annotate("text", x = 2, y = 5, label = paste("Rural vs. Urban: ", adonis_DPC2_ex2$aov.tab$`Pr(>F)`[1], sep = "") , size = 3) +
+  coord_cartesian(clip = "off") +   # allows text to overflow if needed
+  theme_void()
+
+DPC2_ex2_final <- DPC2_ex2 + inset_element(DPC2_ex2_anno, left = 0.55, bottom = 1.05, right = 0.55, top = 1)
+
+
+DPC4_ex2_anno <- ggplot() + 
+  annotate("text", x = 2, y = 5, label = paste("Rural vs. Urban: ", adonis_DPC4_ex2$aov.tab$`Pr(>F)`[1], sep = "") , size = 3) +
+  coord_cartesian(clip = "off") +   # allows text to overflow if needed
+  theme_void()
+
+DPC4_ex2_final <- DPC4_ex2 + inset_element(DPC4_ex2_anno, left = 0.55, bottom = 1.05, right = 0.55, top = 1)
+
+
+DPC7_ex2_anno <- ggplot() + 
+  annotate("text", x = 2, y = 5, label = paste("Rural vs. Urban: ", adonis_DPC7_ex2$aov.tab$`Pr(>F)`[1], sep = "") , size = 3) +
+  coord_cartesian(clip = "off") +   # allows text to overflow if needed
+  theme_void()
+
+DPC7_ex2_final <- DPC7_ex2 + inset_element(DPC7_ex2_anno, left = 0.55, bottom = 1.05, right = 0.55, top = 1)
+
+
+
+
+pcoa_ex2 <-  ggarrange(ggarrange(pre_ex2_final, D22_ex2_final, DPC0_ex2_final, DPC2_ex2_final, DPC4_ex2_final, DPC7_ex2_final),leg_ex2, widths = c(2.5, 0.5),
+          ncol = 2, nrow = 1) 
+
+pcoa_ex2
+ggsave('res_ex2/pcoa.png', plot = pcoa_ex2,device = 'png',width = 8, height = 6)
+
+```
+
+# Phylum level Abundance bar plot
+
+## Fecal
+```{r}
+rela_fecal_ex2 <- transform_sample_counts(ps_fecal_ex2, function(x) x / sum(x) )
+glom_ex2 <- tax_glom(rela_fecal_ex2, taxrank = 'Phylum', NArm = FALSE)
+ps.melt_ex2 <- psmelt(glom_ex2)
+# change to character for easy-adjusted level
+ps.melt_ex2$Phylum <- as.character(ps.melt_ex2$Phylum)
+
+ps.melt_ex2 <- ps.melt_ex2 %>%
+  group_by(time, Phylum) %>%
+  mutate(median=median(Abundance))
+# select group median > 1%
+keep_ex2 <- unique(ps.melt_ex2$Phylum[ps.melt_ex2$median > 0.01])
+ps.melt_ex2$Phylum[!(ps.melt_ex2$Phylum %in% keep_ex2)] <- "Other phyla (< 1%)"
+
+rela_ex2_fecal <- ps.melt_ex2 %>% group_by(Treatment,time, Phylum) %>% summarise(Abundance=mean(Abundance)) 
+
+rela_ex2_fecal$time <- as.factor(rela_ex2_fecal$time)
+levels(rela_ex2_fecal$time) <- c("Day0 (Pre-inoculation)", "Day22", "Day40 (DPC0)","Day42 (DPC2)","Day44 (DPC4)","Day47 (DPC7)") # reorder
+
+## create color palette for barplots
+mypalette <- c("#FF0000", "#FFDB00", "#1bbf06", "#42f5d7", "#0092FF", "#4900FF", "#FF00DB")
+names(mypalette) <- unique(rela_ex2_fecal$Phylum)
+
+
+barplot_ex2_fecal <- ggplot(rela_ex2_fecal, aes(x = Treatment, y = Abundance, fill = Phylum)) + 
+geom_bar(stat = "identity", aes(fill=Phylum)) + 
+labs(x="", y="Fecal microbiota") +
+theme_classic() + 
+  scale_fill_manual(values = mypalette) +
+theme(strip.background = element_blank(), 
+        axis.text.x.bottom = element_text(angle = 90)) +
+  facet_wrap(~time) +
+  theme(legend.position = "none") +
+  theme(legend.direction="horizontal")
+
+legend_abundance <- get_legend( ggplot(rela_ex2_fecal, aes(x = Treatment, y = Abundance, fill = Phylum)) + 
+geom_bar(stat = "identity", aes(fill=Phylum)) + 
+labs(x="", y="Fecal microbiota") +
+theme_classic() + 
+  scale_fill_manual(values = mypalette) +
+  theme(legend.direction="horizontal"))  
+
+barplot_ex2_fecal
+#ggsave('barplot_fecal_ex2.png', plot = barplot_ex2_fecal,device = 'png',width = 8, height = 4)
+```
+
+
+## Digestive tract 
+```{r}
+## control filtered after rarefaction
+ps_dig <- ps.rarefied %>% subset_samples(type %in% c("Ileum", "Colon"))  
+rela_dig <- transform_sample_counts(ps_dig, function(x) x / sum(x) ) 
+
+dig_glom <- tax_glom(rela_dig, taxrank = 'Phylum', NArm = FALSE)
+dig.melt <- psmelt(dig_glom)
+# change to character for easy-adjusted level
+dig.melt$Phylum <- as.character(dig.melt$Phylum)
+
+dig.melt <- dig.melt %>%
+  group_by(time, type,  Phylum) %>%
+  mutate(median=median(Abundance))
+# select group median > 1%
+keep_dig <- unique(dig.melt$Phylum[dig.melt$median > 0.01])
+dig.melt$Phylum[!(dig.melt$Phylum %in% keep_dig)] <- "Low abundance (< 1%)"
+
+rela_dig_ready <- dig.melt %>% group_by(Treatment,time, type, Phylum) %>% summarise(Abundance=mean(Abundance)) 
+
+rela_dig_ready$time <- as.factor(rela_dig_ready$time)
+
+
+barplot_dig_by_time <- ggplot(rela_dig_ready, aes(x = Treatment, y = Abundance, fill = Phylum)) + 
+geom_bar(stat = "identity", aes(fill=Phylum)) + 
+labs(x="", y="Intestinal microbiota") +
+theme_classic() + 
+  scale_fill_manual(values = mypalette) +
+theme(strip.background = element_blank(), 
+        axis.text.x.bottom = element_text(angle = 90)) +
+  facet_wrap(~time + type) +
+  theme(legend.position = "none")
+barplot_dig_by_time
+
+
+
+#ggsave('barplot_nasal.png', plot = barplot_nasal_by_trt,device = 'png',width = 8, height = 4)
+```
+
+
+## Respiration tract
+```{r}
+ps_res <- ps.rarefied %>% subset_samples(type %in% c('Nasal', "BAL"))  
+rela_res <- transform_sample_counts(ps_res, function(x) x / sum(x) ) 
+#nasal_filter <- filter_taxa(physeq = rela_nasal, function(x) sum(x>1e-4) >(0.10*length(x)) , TRUE) %>% transform_sample_counts( function(x) x / sum(x) ) 
+
+res_glom <- tax_glom(rela_res, taxrank = 'Phylum', NArm = FALSE)
+res.melt <- psmelt(res_glom)
+# change to character for easy-adjusted level
+res.melt$Phylum <- as.character(res.melt$Phylum)
+
+res.melt <- res.melt %>%
+  group_by(time, Phylum) %>%
+  mutate(median=median(Abundance))
+# select group median > 1%
+keep_res <- unique(res.melt$Phylum[res.melt$median > 0.01])
+res.melt$Phylum[!(res.melt$Phylum %in% keep_res)] <- "Low abundance (< 1%)"
+
+rela_res_ready <- res.melt %>% group_by(Treatment,time,type, Phylum) %>% summarise(Abundance=mean(Abundance)) 
+
+rela_res_ready$time <- as.factor(rela_res_ready$time)
+levels(rela_res_ready$time) <- c("Day0 (Pre-inoculation)","Day40 (DPC0)","Day42 (DPC2)","Day44 (DPC4)","Day47 (DPC7)", "Day22") # reorder
+
+
+barplot_res_by_time <- ggplot(rela_res_ready, aes(x = Treatment, y = Abundance, fill = Phylum)) + 
+geom_bar(stat = "identity", aes(fill=Phylum)) + 
+labs(x="", y="Respiratory tissues microbiota") +
+theme_classic() + 
+  scale_fill_manual(values = mypalette) +
+theme(strip.background = element_blank(), 
+        axis.text.x.bottom = element_text(angle = 90)) +
+  facet_wrap(~time + type ) +
+  theme(legend.position = "none")
+barplot_res_by_time 
+
+
+
+
+#ggsave('barplot_nasal.png', plot = barplot_nasal_by_trt,device = 'png',width = 8, height = 4)
+```
+
+
+
+## Arrange as single plot
+```{r}
+phylum_abundance <- ggarrange(ggarrange(barplot_ex2_fecal, barplot_dig_by_time, barplot_res_by_time,  ncol = 1, nrow = 3, heights = c(1,1,1)),legend_abundance, heights = c(10, 1),
+          ncol = 1, nrow = 2)
+
+phylum_abundance
+#ggsave('res_ex2/phylum_abundance.png', plot = phylum_abundance,device = 'png',width = 6, height = 12)
+```
+
+
+# Differential abundance analysis
+
+##ANCOM BC
+
+```{r}
+`%!in%` <- Negate(`%in%`)
+## preprocessing
+ fecal_rela_filtered <- filter_taxa(physeq = rela_fecal_ex2, function(x) sum(x>1e-4) > (0.10*length(x)) , TRUE) %>% transform_sample_counts( function(x) x / sum(x) ) 
+ fecal_taxa_filtered <- fecal_rela_filtered@otu_table %>% rownames()
+fecal_ps_filtered <- prune_taxa(fecal_taxa_filtered, ps_fecal_ex2)
+ancom_fecal_input <- tax_glom(fecal_ps_filtered %>% subset_samples(Treatment != 'Control') %>% subset_samples(time %!in% c('Pre_inoculation','Day22'))  , taxrank = 'Genus', NArm = FALSE)
+
+## ANCOMBC
+ancom_fecal_output <- ancombc(phyloseq = ancom_fecal_input, formula = "Treatment" , 
+              p_adj_method = "holm", zero_cut = 0.70, lib_cut = 0, 
+              group = "Treatment", struc_zero = TRUE, neg_lb = TRUE, tol = 1e-5, 
+              max_iter = 100, conserve = TRUE, alpha = 0.05, global = FALSE)
+
+sig_taxa <- ancom_fecal_output$res$diff_abn %>% as.data.frame() %>% filter(TreatmentUrban == "TRUE") %>% rownames()
+
+## sig taxa rela abundance
+fecal_genus_rela <- tax_glom(ps_fecal_ex2 %>% transform_sample_counts( function(x) x / sum(x))   , taxrank = 'Genus', NArm = FALSE)
+fecal_genus_rela_sig <- prune_taxa(sig_taxa, fecal_genus_rela)
+##
+
+fecal_genus_table_sig <- t(fecal_genus_rela_sig@otu_table %>% as.data.frame())
+sig_taxa_name <- fecal_genus_rela_sig@tax_table %>% as.data.frame() %>% select("Genus") %>% unlist() %>% as.vector()
+colnames(fecal_genus_table_sig) <- sig_taxa_name
+fecal_genus_metadata_sig <- fecal_genus_rela_sig@sam_data %>% as.data.frame()
+fecal_genus_sig <- merge(fecal_genus_table_sig, fecal_genus_metadata_sig, by = "row.names") %>% pivot_longer(sig_taxa_name, names_to = "taxa", values_to = "abundance")%>% filter(Treatment != "Control")
+fecal_genus_sig$abundance <- fecal_genus_sig$abundance*100
+ 
+fecal_genus_sig$taxa <- str_replace_all(fecal_genus_sig$taxa, "Unclassified \\[Mogibacteriaceae\\]", "Unclassified Mogibacteriaceae") # formating
+# plot
+ancom_res <- ggplot(fecal_genus_sig, aes(x=Treatment, y=abundance,fill=Treatment)) +
+  geom_boxplot()+ 
+   facet_wrap(~taxa,scales= "free") + 
+   labs(x = "", y = "Abundance (%)",
+    fill = "Treatment")+  
+   theme_classic() +  
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        strip.background = element_blank(),
+        panel.border = element_rect(colour = "black", fill = NA)) +
+  #theme(legend.direction="horizontal")  +
+  theme(legend.position = c(0.85, 0.2))
+
+ancom_res
+ggsave('res_ex2/ancom.png', plot = ancom_res,device = 'png',width = 6, height = 4)
+
+```
+
+
+
+# Correlation
+
+## Formating
+```{r}
+# load data
+immu_res <- read_csv(file = "ft_immu.csv")
+immu_res[,c("trt", "immu", "pig", "time")] <- immu_res %>% select(trt, immu, pig, time) %>%  lapply(factor)
+immu_res_nasal <- immu_res %>% filter(!is.na(time))
+immu_res <- immu_res %>% filter(is.na(time)) %>% select(-time)
+
+# combine metadata to immu data
+metadata_immu <- metadata %>% filter(Experiment.id == 2) %>% filter(Pig.id %in% unique(immu_res$pig))
+immu_full <- inner_join(metadata_immu, immu_res, by = c("Pig.id" = "pig")) 
+immu_bal <- immu_full %>% filter(type == "BAL") %>% filter(immu %in% c("TBLN_CD3", "TBLN_CD3_172",  "BAL_CD3", "BAL_CD172", "TBLN_T_cells", "TBLN_T_helper",  "BAL_lgG_50", "BAL_lgG_100", "BAL_lgG_200",  "BAL_lgG_400", "BAL_lgG_800", "BAL_lgG_1600", "BAL_lgA_50", "BAL_lgA_100", "BAL_lgA_200", "BAL_lgA_400", "BAL_lgA_800", "BAL_lgA_1600"))
+immu_ileum <- immu_full %>% filter(type == "Ileum")  %>% filter(!immu %in% c("TBLN_CD3", "TBLN_CD3_172",  "BAL_CD3", "BAL_CD172", "TBLN_T_cells", "TBLN_T_helper",  "BAL_lgG_50", "BAL_lgG_100", "BAL_lgG_200",  "BAL_lgG_400", "BAL_lgG_800", "BAL_lgG_1600", "BAL_lgA_50", "BAL_lgA_100", "BAL_lgA_200", "BAL_lgA_400", "BAL_lgA_800", "BAL_lgA_1600"))
+immu_colon <- immu_full %>% filter(type == "Colon")  %>% filter(!immu %in% c("TBLN_CD3", "TBLN_CD3_172",  "BAL_CD3", "BAL_CD172", "TBLN_T_cells", "TBLN_T_helper",  "BAL_lgG_50", "BAL_lgG_100", "BAL_lgG_200",  "BAL_lgG_400", "BAL_lgG_800", "BAL_lgG_1600", "BAL_lgA_50", "BAL_lgA_100", "BAL_lgA_200", "BAL_lgA_400", "BAL_lgA_800", "BAL_lgA_1600"))
+immu_fecal <- immu_full %>% filter(type == "Fecal")  %>% filter(!immu %in% c("TBLN_CD3", "TBLN_CD3_172",  "BAL_CD3", "BAL_CD172", "TBLN_T_cells", "TBLN_T_helper",  "BAL_lgG_50", "BAL_lgG_100", "BAL_lgG_200",  "BAL_lgG_400", "BAL_lgG_800", "BAL_lgG_1600", "BAL_lgA_50", "BAL_lgA_100", "BAL_lgA_200", "BAL_lgA_400", "BAL_lgA_800", "BAL_lgA_1600"))
+
+# combine microbiota data to immu data for correlation
+# BAL microbiota to TBLN,BAL & Nasal Swab
+# fecal, colon, & Ileum to MLN
+ps_rela <- transform_sample_counts(ps.rarefied, function(x) x / sum(x) ) 
+ps_corr_fecal <- ps_rela %>% subset_samples(type == 'Fecal')
+ps_corr_ileum <- ps_rela %>% subset_samples(type == 'Ileum')
+ps_corr_colon <- ps_rela %>% subset_samples(type == 'Colon')
+ps_corr_bal <- ps_rela %>% subset_samples(type == 'BAL')
+
+
+# rarefied to genera level
+ps_rela_corr_ileum_glom <- tax_glom(ps_corr_ileum, taxrank = 'Genus', NArm = FALSE)
+ps_rela_corr_ileum_glom_melt <- psmelt(ps_rela_corr_ileum_glom)
+ps_rela_corr_ileum_glom_melt$Genus <- as.character(ps_rela_corr_ileum_glom_melt$Genus)
+
+ps_rela_corr_colon_glom <- tax_glom(ps_corr_colon, taxrank = 'Genus', NArm = FALSE)
+ps_rela_corr_colon_glom_melt <- psmelt(ps_rela_corr_colon_glom)
+ps_rela_corr_colon_glom_melt$Genus <- as.character(ps_rela_corr_colon_glom_melt$Genus)
+
+ps_rela_corr_fecal_glom <- tax_glom(ps_corr_fecal, taxrank = 'Genus', NArm = FALSE)
+ps_rela_corr_fecal_glom_melt <- psmelt(ps_rela_corr_fecal_glom)
+ps_rela_corr_fecal_glom_melt$Genus <- as.character(ps_rela_corr_fecal_glom_melt$Genus)
+
+ps_rela_corr_bal_glom <- tax_glom(ps_corr_bal, taxrank = 'Genus', NArm = FALSE)
+ps_rela_corr_bal_glom_melt <- psmelt(ps_rela_corr_bal_glom)
+ps_rela_corr_bal_glom_melt$Genus <- as.character(ps_rela_corr_bal_glom_melt$Genus)
+
+# corr
+corr_colon <- inner_join(immu_colon, ps_rela_corr_colon_glom_melt, by = c("sample.id", "Pig.id", "Experiment.id", "type", "Treatment", "time")) %>% 
+  group_by(immu, Genus) %>% 
+  summarise(p = cor.test(data,Abundance, method="kendall")$p.value, r = cor.test(data,Abundance, method="kendall")$estimate ) 
+#NA appear if there are attributes with zero variance (with all elements equal), 0 in this case
+corr_colon_p <- corr_colon %>% select(-r) %>%  pivot_wider(names_from = Genus, values_from = p)
+corr_colon_p[is.na(corr_colon_p)] <- 1 
+corr_colon_r <- corr_colon %>% select(-p) %>%  pivot_wider(names_from = Genus, values_from = r) 
+corr_colon_r[is.na(corr_colon_r)] <- 0 
+
+
+corr_ileum <- inner_join(immu_ileum, ps_rela_corr_ileum_glom_melt, by = c("sample.id", "Pig.id", "Experiment.id", "type", "Treatment", "time")) %>% 
+  group_by(immu, Genus) %>% 
+  summarise(p = cor.test(data,Abundance, method="kendall")$p.value, r = cor.test(data,Abundance, method="kendall")$estimate ) 
+#NA appear if there are attributes with zero variance (with all elements equal), 0 in this case
+corr_ileum_p <- corr_ileum %>% select(-r) %>%  pivot_wider(names_from = Genus, values_from = p)
+corr_ileum_p[is.na(corr_ileum_p)] <- 1 
+corr_ileum_r <- corr_ileum %>% select(-p) %>%  pivot_wider(names_from = Genus, values_from = r) 
+corr_ileum_r[is.na(corr_ileum_r)] <- 0 
+
+
+corr_fecal <- inner_join(immu_fecal, ps_rela_corr_fecal_glom_melt, by = c("sample.id", "Pig.id", "Experiment.id", "type", "Treatment", "time")) %>% 
+  group_by(immu, Genus) %>% 
+  summarise(p = cor.test(data,Abundance, method="kendall")$p.value, r = cor.test(data,Abundance, method="kendall")$estimate ) 
+#NA appear if there are attributes with zero variance (with all elements equal), 0 in this case
+corr_fecal_p <- corr_fecal %>% select(-r) %>%  pivot_wider(names_from = Genus, values_from = p)
+corr_fecal_p[is.na(corr_fecal_p)] <- 1 
+corr_fecal_r <- corr_fecal %>% select(-p) %>%  pivot_wider(names_from = Genus, values_from = r) 
+corr_fecal_r[is.na(corr_fecal_r)] <- 0 
+
+
+corr_bal <- inner_join(immu_bal, ps_rela_corr_bal_glom_melt, by = c("sample.id", "Pig.id", "Experiment.id", "type", "Treatment", "time")) %>% 
+  group_by(immu, Genus) %>% 
+  summarise(p = cor.test(data,Abundance, method="kendall")$p.value, r = cor.test(data,Abundance, method="kendall")$estimate ) 
+#NA appear if there are attributes with zero variance (with all elements equal), 0 in this case
+corr_bal_p <- corr_bal %>% select(-r) %>%  pivot_wider(names_from = Genus, values_from = p)
+corr_bal_p[is.na(corr_bal_p)] <- 1 
+corr_bal_r <- corr_bal %>% select(-p) %>%  pivot_wider(names_from = Genus, values_from = r) 
+corr_bal_r[is.na(corr_bal_r)] <- 0 
+
+corr_bal_p
+
+```
+
+## Get significant taxa (if in any of the immunology data)
+```{r}
+sig_taxa <- function(x){
+ taxa <- c()
+  for (i in 1:ncol(x)){
+    if (any(x[i] < 0.05)){
+      taxa <- append(names(x)[i], taxa)
+    }
+  }
+    return(taxa)
+}
+
+sig_taxa_bal <- corr_bal_p %>% ungroup() %>% select(-immu) %>% sig_taxa()
+sig_taxa_colon <- corr_colon_p %>% ungroup() %>% select(-immu) %>% sig_taxa()
+sig_taxa_ileum <- corr_ileum_p %>% ungroup() %>% select(-immu) %>% sig_taxa()
+sig_taxa_fecal <- corr_fecal_p %>% ungroup() %>% select(-immu) %>% sig_taxa()
+```
+
+
+## Plot correlation results
+### Formating
+```{r}
+corr_colon_r_matrix_pre <- corr_colon_r[c("immu", sig_taxa_colon)]
+corr_colon_r_matrix_pre[corr_colon_p[c("immu", sig_taxa_colon)] > 0.05] <- 0 # if not significant (p > 0.05), set r to 0
+
+corr_fecal_r_matrix_pre <- corr_fecal_r[c("immu", sig_taxa_fecal)]
+corr_fecal_r_matrix_pre[corr_fecal_p[c("immu", sig_taxa_fecal)] > 0.05] <- 0 # if not significant (p > 0.05), set r to 0
+
+corr_bal_r_matrix_pre <- corr_bal_r[c("immu", sig_taxa_bal)]
+corr_bal_r_matrix_pre[corr_bal_p[c("immu", sig_taxa_bal)] > 0.05] <- 0 # if not significant (p > 0.05), set r to 0
+
+# combine colon and fecal matrix, if not significant set r to 0
+corr_colon_r_matrix_pre[setdiff(colnames(corr_fecal_r_matrix_pre), colnames(corr_colon_r_matrix_pre))] <- 0
+corr_fecal_r_matrix_pre[setdiff(colnames(corr_colon_r_matrix_pre), colnames(corr_fecal_r_matrix_pre))] <- 0
+corr_colon_r_matrix_pre["microbiota"] <- "colon"
+corr_fecal_r_matrix_pre["microbiota"] <- "fecal"
+
+corr_dig_column_name <- union(colnames(corr_fecal_r_matrix_pre), colnames(corr_colon_r_matrix_pre))
+corr_dig_for_heatmap <- rbind(corr_colon_r_matrix_pre[corr_dig_column_name], corr_fecal_r_matrix_pre[corr_dig_column_name]) %>% ungroup()
+corr_dig_for_heatmap <- corr_dig_for_heatmap %>% 
+  plyr::rename(c("Pseudoramibacter_Eubacterium" = "Pseudoramibacter", "Unclassified [Mogibacteriaceae]" = "Unclassified Mogibacteriaceae", "Unclassified [Barnesiellaceae]" = "Unclassified Barnesiellaceae", "[Ruminococcus]" = "Ruminococcus", "[Eubacterium]" = "Eubacterium")) # formating; plyr::rename functions as pandas 
+
+
+```
+
+### Complexheatmap, fecal and colon
+```{r}
+
+corr_dig_for_heatmap$immu <- str_split_fixed(corr_dig_for_heatmap$immu, "MLN_", 2)[,2]
+replacement <- c("CD172" = "Myeloid Cells", "CD3$" = "Non-T cells", "T_helper" = "T-helper/memory cells", "T_cells" = "Cytotoxic T cells")
+corr_dig_for_heatmap$immu <- str_replace_all(corr_dig_for_heatmap$immu, replacement)
+# visualizing with complexheatmap package
+row_ha <- rowAnnotation( Immunology = corr_dig_for_heatmap$immu,
+                         col = list(Immunology = c("Myeloid Cells" = "#ebc034", "Non-T cells" = "#34eb58", "T-helper/memory cells" = "#080808", "Cytotoxic T cells" = "#c73c9d"))
+                         ) 
+
+heatmap_dig <- corr_dig_for_heatmap %>% select(-c(immu, microbiota)) %>% Heatmap(name = "r", 
+                                                                  #left_annotation = row_ha, # annotation  
+                                                                  row_split = corr_dig_for_heatmap$microbiota, # split colon and fecal 
+                                                                  row_labels = corr_dig_for_heatmap$immu,
+                                                                  show_heatmap_legend = FALSE)
+
+# draw(heatmap_dig, heatmap_legend_side = "bottom", annotation_legend_side = "bottom") # adjust legend position
+heatmap_dig
+
+```
+
+
+### Complexheatmap, Bal 
+```{r}
+corr_bal_r_matrix_pre <- corr_bal_r[c("immu", sig_taxa_bal)]
+corr_bal_r_matrix_pre[corr_bal_p[c("immu", sig_taxa_bal)] > 0.05] <- 0 # if not significant (p > 0.05), set r to 0
+corr_bal_r_matrix_pre <- corr_bal_r_matrix_pre %>% plyr::rename(c("[Ruminococcus]" =  "Ruminococcus"))
+
+# rename, for better visualization 
+corr_bal_r_matrix_row_rename <- c("Myeloid cells", "Non-T cells",
+                                  "1 in 100", "1 in 1600", "1 in 200", "1 in 400", "1 in 50", "1 in 800",
+                                   "1 in 100", "1 in 1600", "1 in 200", "1 in 400", "1 in 50", "1 in 800",
+                                  "Non-T cells", "Myeloid cells",
+                                  "T cells", "T helper/memory cells")
+
+corr_bal_r_matrix_pre$immu <- corr_bal_r_matrix_row_rename
+
+corr_bal_r_matrix_pre$Cells <- c("BAL Cells Myloid Cells", "BAL Cells Myloid Cells", rep("lgA", 6), rep("lgG", 6), "TBLN MNCs Myloid cells", "TBLN MNCs Myloid cells", "TBLN MNCs Immune Cells", "TBLN MNCs Immune Cells")
+
+corr_bal_r_matrix_pre <- corr_bal_r_matrix_pre %>% mutate(immu = as.character(immu)) %>%  arrange(Cells, nchar(immu))  # nchar()  
+corr_bal_r_matrix_pre$immu <- corr_bal_r_matrix_pre$immu %>% factor(levels = c("1 in 50", "1 in 100", "1 in 200", "1 in 400", "1 in 800", "1 in 1600", "Non-T cells", "Myeloid cells", "T cells", "T helper/memory cells"))
+corr_bal_r_matrix_pre$order = 1:nrow(corr_bal_r_matrix_pre)
+
+
+row_ha_bal <- rowAnnotation(Cells = corr_bal_r_matrix_pre$Cells, 
+                             col = list(Cells = c("BAL Cells Myloid Cells" = "#ebc034", "lgA" = "#34eb58", "lgG" = "#080808", "TBLN MNCs Immune Cells" = "#c73c9d", "TBLN MNCs Myloid cells" = "#3c94c7")))                          
+heatmap_bal <- corr_bal_r_matrix_pre %>% ungroup() %>% select(-c(immu,  Cells, order)) %>% Heatmap(name = "r", row_split = corr_bal_r_matrix_pre$Cells, row_title = NULL, left_annotation = row_ha_bal, row_order = corr_bal_r_matrix_pre$order, row_labels = corr_bal_r_matrix_pre$immu)
+
+heatmap_bal_adjusted <- draw(heatmap_bal, heatmap_legend_side = "bottom", annotation_legend_side = "bottom", newpage = FALSE)
+```
+
+### Combine correlation results as a single figure
+```{r}
+# use `grid.grabExpr()` to capture the output of ComplexHeatmap as a `grob` object and arrange `grob` objects by other package.
+# see https://support.bioconductor.org/p/103113/
+grob1 <-grid.grabExpr(draw(heatmap_dig, ))
+grob2 <-grid.grabExpr(draw(heatmap_bal_adjusted))
+
+heatmap_dig_ready <- annotate_figure(grob1, fig.lab = "(a)")
+heatmap_bal_ready <- annotate_figure(grob2, fig.lab = "(b)")
+corr_heatmap <- ggarrange(heatmap_dig_ready, heatmap_bal_ready, nrow = 2, heights = c(4,6))
+
+
+
+ggsave('res_ex2/correlation.png', plot = corr_heatmap,device = 'png',width = 7, height = 12)
+```
