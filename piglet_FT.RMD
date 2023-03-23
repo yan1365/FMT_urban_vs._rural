@@ -87,13 +87,13 @@ metadata <- read.table(file = "metadata.tsv", sep = "\t", header = T, row.names 
 metadata$'sample.id' <- rownames(metadata)
 
 ##rename
-metadata$time <- str_replace(metadata$time, "Pre_inoculation" , "Day0 (Pre-inoculation)")
-metadata$time <- str_replace(metadata$time, "DPC0" , "Day40 (DPC0)")
-metadata$time <- str_replace(metadata$time, "DPC2" , "Day42 (DPC2)")
-metadata$time <- str_replace(metadata$time, "DPC4" , "Day44 (DPC4)")
-metadata$time <- str_replace(metadata$time, "DPC7" , "Day47 (DPC7)")
+metadata$time <- str_replace(metadata$time, "Pre_inoculation" , "Day7 (Pre-inoculation)")
+metadata$time <- str_replace(metadata$time, "DPC0" , "Day40 (DPI0)")
+metadata$time <- str_replace(metadata$time, "DPC2" , "Day42 (DPI2)")
+metadata$time <- str_replace(metadata$time, "DPC4" , "Day44 (DPI4)")
+metadata$time <- str_replace(metadata$time, "DPC7" , "Day47 (DPI7)")
 
-metadata_con <- metadata %>% filter(Treatment == "Control")
+#metadata_con <- metadata %>% filter(Treatment == "Control")
 metadata<- metadata %>% filter(Experiment.id == 2) ## only use data from experiment 2, because immunology data from experiment 2
 colnames(otu) <- str_replace_all(colnames(otu),"X","")
 ```
@@ -103,16 +103,16 @@ colnames(otu) <- str_replace_all(colnames(otu),"X","")
 OTU = otu_table(as.matrix(otu), taxa_are_rows = TRUE)
 TAX = tax_table(as.matrix(tax.clean))
 SAMPLE <- sample_data(metadata)
-SAMPLE_CON <- sample_data(metadata_con)
+#SAMPLE_CON <- sample_data(metadata_con)
 ps <- phyloseq(OTU, TAX, SAMPLE)
-ps_control <- phyloseq(OTU, TAX, SAMPLE_CON)
+#ps_control <- phyloseq(OTU, TAX, SAMPLE_CON)
 ```
 
 ## Rarefaction
 ```{r}
 set.seed(111) # keep result reproductive
 ps.rarefied = rarefy_even_depth(ps, rngseed=1, sample.size=4000, replace=F)
-ps.rarefied.con = rarefy_even_depth(ps_control, rngseed=1, sample.size=4000, replace=F)
+#ps.rarefied.con = rarefy_even_depth(ps_control, rngseed=1, sample.size=4000, replace=F)
 
 ```
 
@@ -131,7 +131,8 @@ alpha = estimate_richness(ps.rarefied, measures = c("Observed", "Shannon","Chao1
 rownames(alpha) <- str_replace_all(rownames(alpha),"X","")
 alpha1 <- alpha %>% tibble::rownames_to_column("sample-id")
 alpha_ready <- merge(alpha1,meta_stats, by = "sample-id")
-alpha_fecal <- alpha_ready %>% filter(type == "Fecal") %>% filter(Treatment != 'Control')
+time_levels = c("Day22", "Day40 (DPI0)", "Day42 (DPI2)", "Day44 (DPI4)", "Day47 (DPI7)")
+alpha_fecal <- alpha_ready %>% filter(type == "Fecal") %>% filter(Treatment != 'Control') %>% filter(time != "Day7 (Pre-inoculation)") %>% mutate(time = factor(time, levels = time_levels))
 ```
 
 ## Plot shannon
@@ -182,70 +183,70 @@ richness
 
 ## PCoA 
 ```{r}
-control <- ps.rarefied.con %>% subset_samples(type == 'Fecal')
+#control <- ps.rarefied.con %>% subset_samples(type == 'Fecal')
 ps_fecal_ex2 <- ps.rarefied %>% subset_samples(type == 'Fecal')
-ps_fecal_ex2 <- merge_phyloseq(ps_fecal_ex2,control)
+#ps_fecal_ex2 <- merge_phyloseq(ps_fecal_ex2,control)
 
 
 bray_ex2 <- phyloseq::distance(ps_fecal_ex2, method="bray")
 
 pcoa_ex2 <- ordinate(ps_fecal_ex2, method="PCoA", distance=bray_ex2)
-ex2 <- plot_ordination(ps_fecal_ex2 , pcoa_ex2, color="Treatment")  + 
+ex2 <- plot_ordination(ps_fecal_ex2 , pcoa_ex2, shape="Treatment")  + 
   theme_classic() +
   theme(strip.background = element_blank()) +
   facet_wrap(~time, scales="free")
 leg_ex2 <- get_legend(ex2)  # from library "ggpubr"
   
-fecal_pre_ex2 <- ps_fecal_ex2 %>% subset_samples(time == 'Day0 (Pre-inoculation)')  ## before virus challenge
-bray_pre_ex2 <- phyloseq::distance(fecal_pre_ex2, method="bray") 
-pcoa_pre_ex2 <- ordinate(fecal_pre_ex2, method="PCoA", distance=bray_pre_ex2)
-pre_ex2 <- plot_ordination(fecal_pre_ex2, pcoa_pre_ex2, color="Treatment") + 
-  theme_classic()  + theme(plot.title = element_text(hjust = 0.5)) +labs(title = "Pre-inoculation", x = paste("PC1 [", round(pcoa_pre_ex2$values$Relative_eig[1]*100, 1), "%]",sep = ""),
-    y = paste("PC2 [", round(pcoa_pre_ex2$values$Relative_eig[2]*100, 1), "%]",sep = "")) + theme(legend.position = "none")
+#fecal_pre_ex2 <- ps_fecal_ex2 %>% subset_samples(time == 'Day7 (Pre-inoculation)')  ## before virus challenge
+#bray_pre_ex2 <- phyloseq::distance(fecal_pre_ex2, method="bray") 
+#pcoa_pre_ex2 <- ordinate(fecal_pre_ex2, method="PCoA", distance=bray_pre_ex2)
+#pre_ex2 <- plot_ordination(fecal_pre_ex2, pcoa_pre_ex2, shape="Treatment") + 
+#  theme_classic()  + theme(plot.title = element_text(hjust = 0.5)) +labs(title = "Day7 (Pre-inoculation)", x = paste("PC1 [", round(pcoa_pre_ex2$values$Relative_eig[1]*100, 1), "%]",sep = ""),
+#    y = paste("PC2 [", round(pcoa_pre_ex2$values$Relative_eig[2]*100, 1), "%]",sep = "")) + theme(legend.position = "none")
 
 
 fecal_22_ex2 <- ps_fecal_ex2 %>% subset_samples(time == 'Day22')  ## before virus challenge
 bray_22_ex2 <- phyloseq::distance(fecal_22_ex2, method="bray") 
 pcoa_22_ex2 <- ordinate(fecal_22_ex2, method="PCoA", distance=bray_22_ex2)
-day_22_ex2 <- plot_ordination(fecal_22_ex2, pcoa_22_ex2, color="Treatment") + 
-  theme_classic()  + theme(legend.position = "none") +labs(title = "Day 22", x = paste("PC1 [", round(pcoa_22_ex2$values$Relative_eig[1]*100, 1), "%]",sep = ""),
+day_22_ex2 <- plot_ordination(fecal_22_ex2, pcoa_22_ex2, shape="Treatment") + 
+  theme_classic()  + theme(legend.position = "none") +labs(title = "Day22", x = paste("PC1 [", round(pcoa_22_ex2$values$Relative_eig[1]*100, 1), "%]",sep = ""),
     y = paste("PC2 [", round(pcoa_22_ex2$values$Relative_eig[2]*100, 1), "%]",sep = "")) + 
   theme(plot.title = element_text(hjust = 0.5))
 
 
-fecal_DPC0_ex2 <- ps_fecal_ex2 %>% subset_samples(time == 'Day40 (DPC0)')  ## before virus challenge
-bray_DPC0_ex2 <- phyloseq::distance(fecal_DPC0_ex2, method="bray") 
-pcoa_DPC0_ex2 <- ordinate(fecal_DPC0_ex2, method="PCoA", distance=bray_DPC0_ex2)
-DPC0_ex2 <-plot_ordination(fecal_DPC0_ex2, pcoa_DPC0_ex2, color="Treatment") + 
+fecal_DPI0_ex2 <- ps_fecal_ex2 %>% subset_samples(time == 'Day40 (DPI0)')  ## before virus challenge
+bray_DPI0_ex2 <- phyloseq::distance(fecal_DPI0_ex2, method="bray") 
+pcoa_DPI0_ex2 <- ordinate(fecal_DPI0_ex2, method="PCoA", distance=bray_DPI0_ex2)
+DPI0_ex2 <-plot_ordination(fecal_DPI0_ex2, pcoa_DPI0_ex2, shape="Treatment") + 
   theme_classic()  + theme(plot.title = element_text(hjust = 0.5),
-    legend.position = "none") +labs(title = "DPC0 (day 40)", x = paste("PC1 [", round(pcoa_22_ex2$values$Relative_eig[1]*100, 1), "%]",sep = ""),
-    y = paste("PC2 [", round(pcoa_22_ex2$values$Relative_eig[2]*100, 1), "%]",sep = ""))
+    legend.position = "none") +labs(title = "Day40 (DPI0)", x = paste("PC1 [", round(pcoa_DPI0_ex2$values$Relative_eig[1]*100, 1), "%]",sep = ""),
+    y = paste("PC2 [", round(pcoa_DPI0_ex2$values$Relative_eig[2]*100, 1), "%]",sep = ""))
 
-fecal_DPC2_ex2 <- ps_fecal_ex2 %>% subset_samples(time == 'Day42 (DPC2)')  ## before virus challenge
-bray_DPC2_ex2 <- phyloseq::distance(fecal_DPC2_ex2, method="bray") 
-pcoa_DPC2_ex2 <- ordinate(fecal_DPC2_ex2, method="PCoA", distance=bray_DPC2_ex2)
-DPC2_ex2 <- plot_ordination(fecal_DPC2_ex2, pcoa_DPC2_ex2, color="Treatment") + 
+fecal_DPI2_ex2 <- ps_fecal_ex2 %>% subset_samples(time == 'Day42 (DPI2)')  ## before virus challenge
+bray_DPI2_ex2 <- phyloseq::distance(fecal_DPI2_ex2, method="bray") 
+pcoa_DPI2_ex2 <- ordinate(fecal_DPI2_ex2, method="PCoA", distance=bray_DPI2_ex2)
+DPI2_ex2 <- plot_ordination(fecal_DPI2_ex2, pcoa_DPI2_ex2, shape="Treatment") + 
   theme_classic()  + theme(plot.title = element_text(hjust = 0.5),
-    legend.position = "none") +labs(title = "DPC2 (day 42)", x = paste("PC1 [", round(pcoa_DPC2_ex2$values$Relative_eig[1]*100, 1), "%]",sep = ""),
-    y = paste("PC2 [", round(pcoa_DPC2_ex2$values$Relative_eig[2]*100, 1), "%]",sep = ""))
+    legend.position = "none") +labs(title = "Day42 (DPI2)", x = paste("PC1 [", round(pcoa_DPI2_ex2$values$Relative_eig[1]*100, 1), "%]",sep = ""),
+    y = paste("PC2 [", round(pcoa_DPI2_ex2$values$Relative_eig[2]*100, 1), "%]",sep = ""))
 
-fecal_DPC4_ex2 <- ps_fecal_ex2 %>% subset_samples(time == 'Day44 (DPC4)')  ## before virus challenge
-bray_DPC4_ex2 <- phyloseq::distance(fecal_DPC4_ex2, method="bray") 
-pcoa_DPC4_ex2 <- ordinate(fecal_DPC4_ex2, method="PCoA", distance=bray_DPC4_ex2)
-DPC4_ex2 <- plot_ordination(fecal_DPC4_ex2, pcoa_DPC4_ex2, color="Treatment") + 
+fecal_DPI4_ex2 <- ps_fecal_ex2 %>% subset_samples(time == 'Day44 (DPI4)')  ## before virus challenge
+bray_DPI4_ex2 <- phyloseq::distance(fecal_DPI4_ex2, method="bray") 
+pcoa_DPI4_ex2 <- ordinate(fecal_DPI4_ex2, method="PCoA", distance=bray_DPI4_ex2)
+DPI4_ex2 <- plot_ordination(fecal_DPI4_ex2, pcoa_DPI4_ex2, shape="Treatment") + 
   theme_classic()  + theme(plot.title = element_text(hjust = 0.5),
-    legend.position = "none") +labs(title = "DPC4 (day 44)", x = paste("PC1 [", round(pcoa_DPC4_ex2$values$Relative_eig[1]*100, 1), "%]",sep = ""),
-    y = paste("PC2 [", round(pcoa_DPC4_ex2$values$Relative_eig[2]*100, 1), "%]",sep = ""))
+    legend.position = "none") +labs(title = "Day44 (DPI4)", x = paste("PC1 [", round(pcoa_DPI4_ex2$values$Relative_eig[1]*100, 1), "%]",sep = ""),
+    y = paste("PC2 [", round(pcoa_DPI4_ex2$values$Relative_eig[2]*100, 1), "%]",sep = ""))
 
-fecal_DPC7_ex2 <- ps_fecal_ex2 %>% subset_samples(time == 'Day47 (DPC7)')  ## before virus challenge
-bray_DPC7_ex2 <- phyloseq::distance(fecal_DPC7_ex2, method="bray") 
-pcoa_DPC7_ex2 <- ordinate(fecal_DPC7_ex2, method="PCoA", distance=bray_DPC7_ex2)
-DPC7_ex2 <- plot_ordination(fecal_DPC7_ex2, pcoa_DPC7_ex2, color="Treatment") + 
+fecal_DPI7_ex2 <- ps_fecal_ex2 %>% subset_samples(time == 'Day47 (DPI7)')  ## before virus challenge
+bray_DPI7_ex2 <- phyloseq::distance(fecal_DPI7_ex2, method="bray") 
+pcoa_DPI7_ex2 <- ordinate(fecal_DPI7_ex2, method="PCoA", distance=bray_DPI7_ex2)
+DPI7_ex2 <- plot_ordination(fecal_DPI7_ex2, pcoa_DPI7_ex2, shape="Treatment") + 
   theme_classic()  + theme(plot.title = element_text(hjust = 0.5),
-    legend.position = "none") +labs(title = "DPC7 (day 47)", x = paste("PC1 [", round(pcoa_DPC7_ex2$values$Relative_eig[1]*100, 1), "%]",sep = ""),
-    y = paste("PC2 [", round(pcoa_DPC7_ex2$values$Relative_eig[2]*100, 1), "%]",sep = ""))
+    legend.position = "none") +labs(title = "Day47 (DPI7)", x = paste("PC1 [", round(pcoa_DPI7_ex2$values$Relative_eig[1]*100, 1), "%]",sep = ""),
+    y = paste("PC2 [", round(pcoa_DPI7_ex2$values$Relative_eig[2]*100, 1), "%]",sep = ""))
 
-ggarrange(ggarrange(pre_ex2,day_22_ex2, DPC0_ex2,DPC2_ex2,DPC4_ex2,DPC7_ex2),leg_ex2, widths = c(2.5, 0.5),
+ggarrange(ggarrange(day_22_ex2, DPI0_ex2,DPI2_ex2,DPI4_ex2,DPI7_ex2),leg_ex2, widths = c(2.5, 0.5),
           ncol = 2, nrow = 1) 
 
 #ggsave('PCoa_ex2.png', plot = ex2_by_time,device = 'png',width = 12, height = 4)
@@ -254,25 +255,25 @@ ggarrange(ggarrange(pre_ex2,day_22_ex2, DPC0_ex2,DPC2_ex2,DPC4_ex2,DPC7_ex2),leg
 
 ## Add Adonis results as the annotation
 ```{r}
-adonis_pre_ex2 <- adonis(phyloseq::distance(fecal_pre_ex2 %>% subset_samples(Treatment %in% c("Rural", "Urban")), method="bray")  ~ Treatment, fecal_pre_ex2 %>% subset_samples(Treatment %in% c("Rural", "Urban")) %>% sample_data() %>% data.frame())
+#adonis_pre_ex2 <- adonis(phyloseq::distance(fecal_pre_ex2 %>% subset_samples(Treatment %in% c("Rural", "Urban")), method="bray")  ~ Treatment, fecal_pre_ex2 %>% subset_samples(Treatment %in% c("Rural", "Urban")) %>% sample_data() %>% data.frame())
 
 adonis_22_ex2 <- adonis(phyloseq::distance(fecal_22_ex2 %>% subset_samples(Treatment %in% c("Rural", "Urban")), method="bray")  ~ Treatment, fecal_22_ex2 %>% subset_samples(Treatment %in% c("Rural", "Urban")) %>% sample_data() %>% data.frame())
 
-adonis_DPC0_ex2 <- adonis(phyloseq::distance(fecal_DPC0_ex2 %>% subset_samples(Treatment %in% c("Rural", "Urban")), method="bray")  ~ Treatment, fecal_DPC0_ex2 %>% subset_samples(Treatment %in% c("Rural", "Urban")) %>% sample_data() %>% data.frame())
+adonis_DPI0_ex2 <- adonis(phyloseq::distance(fecal_DPI0_ex2 %>% subset_samples(Treatment %in% c("Rural", "Urban")), method="bray")  ~ Treatment, fecal_DPI0_ex2 %>% subset_samples(Treatment %in% c("Rural", "Urban")) %>% sample_data() %>% data.frame())
 
-adonis_DPC2_ex2 <- adonis(phyloseq::distance(fecal_DPC2_ex2 %>% subset_samples(Treatment %in% c("Rural", "Urban")), method="bray")  ~ Treatment, fecal_DPC2_ex2 %>% subset_samples(Treatment %in% c("Rural", "Urban")) %>% sample_data() %>% data.frame())
+adonis_DPI2_ex2 <- adonis(phyloseq::distance(fecal_DPI2_ex2 %>% subset_samples(Treatment %in% c("Rural", "Urban")), method="bray")  ~ Treatment, fecal_DPI2_ex2 %>% subset_samples(Treatment %in% c("Rural", "Urban")) %>% sample_data() %>% data.frame())
 
-adonis_DPC4_ex2 <- adonis(phyloseq::distance(fecal_DPC4_ex2 %>% subset_samples(Treatment %in% c("Rural", "Urban")), method="bray")  ~ Treatment, fecal_DPC4_ex2 %>% subset_samples(Treatment %in% c("Rural", "Urban")) %>% sample_data() %>% data.frame())
+adonis_DPI4_ex2 <- adonis(phyloseq::distance(fecal_DPI4_ex2 %>% subset_samples(Treatment %in% c("Rural", "Urban")), method="bray")  ~ Treatment, fecal_DPI4_ex2 %>% subset_samples(Treatment %in% c("Rural", "Urban")) %>% sample_data() %>% data.frame())
 
-adonis_DPC7_ex2 <- adonis(phyloseq::distance(fecal_DPC7_ex2 %>% subset_samples(Treatment %in% c("Rural", "Urban")), method="bray")  ~ Treatment, fecal_DPC7_ex2 %>% subset_samples(Treatment %in% c("Rural", "Urban")) %>% sample_data() %>% data.frame())
+adonis_DPI7_ex2 <- adonis(phyloseq::distance(fecal_DPI7_ex2 %>% subset_samples(Treatment %in% c("Rural", "Urban")), method="bray")  ~ Treatment, fecal_DPI7_ex2 %>% subset_samples(Treatment %in% c("Rural", "Urban")) %>% sample_data() %>% data.frame())
 
 
-pre_ex2_anno <- ggplot() + 
-  annotate("text", x = 2, y = 5, label = paste("Rural vs. Urban: ", adonis_pre_ex2$aov.tab$`Pr(>F)`[1], sep = "") , size = 3) +
-  coord_cartesian(clip = "off") +   # allows text to overflow if needed
-  theme_void()
+#pre_ex2_anno <- ggplot() + 
+#  annotate("text", x = 2, y = 5, label = paste("Rural vs. Urban: ", adonis_pre_ex2$aov.tab$`Pr(>F)`[1], sep = "") , size = 3) +
+#  coord_cartesian(clip = "off") +   # allows text to overflow if needed
+#  theme_void()
 
-pre_ex2_final <- pre_ex2 + inset_element(pre_ex2_anno, left = 0.55, bottom = 1.05, right = 0.55, top = 1) # function "inset_element" from library "patchwork" 
+#pre_ex2_final <- pre_ex2 + inset_element(pre_ex2_anno, left = 0.55, bottom = 1.05, right = 0.55, top = 1) # function "inset_element" from library "patchwork" 
 
 
 D22_ex2_anno <- ggplot() + 
@@ -283,45 +284,47 @@ D22_ex2_anno <- ggplot() +
 D22_ex2_final <- day_22_ex2 + inset_element(D22_ex2_anno, left = 0.55, bottom = 1.05, right = 0.55, top = 1)
 
 
-DPC0_ex2_anno <- ggplot() + 
-  annotate("text", x = 2, y = 5, label = paste("Rural vs. Urban: ", adonis_DPC0_ex2$aov.tab$`Pr(>F)`[1], sep = "") , size = 3) +
+DPI0_ex2_anno <- ggplot() + 
+  annotate("text", x = 2, y = 5, label = paste("Rural vs. Urban: ", adonis_DPI0_ex2$aov.tab$`Pr(>F)`[1], sep = "") , size = 3) +
   coord_cartesian(clip = "off") +   # allows text to overflow if needed
   theme_void()
 
-DPC0_ex2_final <- DPC0_ex2 + inset_element(DPC0_ex2_anno, left = 0.55, bottom = 1.05, right = 0.55, top = 1)
+DPI0_ex2_final <- DPI0_ex2 + inset_element(DPI0_ex2_anno, left = 0.55, bottom = 1.05, right = 0.55, top = 1)
 
 
-DPC2_ex2_anno <- ggplot() + 
-  annotate("text", x = 2, y = 5, label = paste("Rural vs. Urban: ", adonis_DPC2_ex2$aov.tab$`Pr(>F)`[1], sep = "") , size = 3) +
+DPI2_ex2_anno <- ggplot() + 
+  annotate("text", x = 2, y = 5, label = paste("Rural vs. Urban: ", adonis_DPI2_ex2$aov.tab$`Pr(>F)`[1], sep = "") , size = 3) +
   coord_cartesian(clip = "off") +   # allows text to overflow if needed
   theme_void()
 
-DPC2_ex2_final <- DPC2_ex2 + inset_element(DPC2_ex2_anno, left = 0.55, bottom = 1.05, right = 0.55, top = 1)
+DPI2_ex2_final <- DPI2_ex2 + inset_element(DPI2_ex2_anno, left = 0.55, bottom = 1.05, right = 0.55, top = 1)
 
 
-DPC4_ex2_anno <- ggplot() + 
-  annotate("text", x = 2, y = 5, label = paste("Rural vs. Urban: ", adonis_DPC4_ex2$aov.tab$`Pr(>F)`[1], sep = "") , size = 3) +
+DPI4_ex2_anno <- ggplot() + 
+  annotate("text", x = 2, y = 5, label = paste("Rural vs. Urban: ", adonis_DPI4_ex2$aov.tab$`Pr(>F)`[1], sep = "") , size = 3) +
   coord_cartesian(clip = "off") +   # allows text to overflow if needed
   theme_void()
 
-DPC4_ex2_final <- DPC4_ex2 + inset_element(DPC4_ex2_anno, left = 0.55, bottom = 1.05, right = 0.55, top = 1)
+DPI4_ex2_final <- DPI4_ex2 + inset_element(DPI4_ex2_anno, left = 0.55, bottom = 1.05, right = 0.55, top = 1)
 
 
-DPC7_ex2_anno <- ggplot() + 
-  annotate("text", x = 2, y = 5, label = paste("Rural vs. Urban: ", adonis_DPC7_ex2$aov.tab$`Pr(>F)`[1], sep = "") , size = 3) +
+DPI7_ex2_anno <- ggplot() + 
+  annotate("text", x = 2, y = 5, label = paste("Rural vs. Urban: ", adonis_DPI7_ex2$aov.tab$`Pr(>F)`[1], sep = "") , size = 3) +
   coord_cartesian(clip = "off") +   # allows text to overflow if needed
   theme_void()
 
-DPC7_ex2_final <- DPC7_ex2 + inset_element(DPC7_ex2_anno, left = 0.55, bottom = 1.05, right = 0.55, top = 1)
+DPI7_ex2_final <- DPI7_ex2 + inset_element(DPI7_ex2_anno, left = 0.55, bottom = 1.05, right = 0.55, top = 1)
 
 
 
 
-pcoa_ex2 <-  ggarrange(ggarrange(pre_ex2_final, D22_ex2_final, DPC0_ex2_final, DPC2_ex2_final, DPC4_ex2_final, DPC7_ex2_final),leg_ex2, widths = c(2.5, 0.5),
+pcoa_ex2 <-  ggarrange(ggarrange(D22_ex2_final, DPI0_ex2_final, DPI2_ex2_final, DPI4_ex2_final, DPI7_ex2_final),leg_ex2, widths = c(2.5, 0.5),
           ncol = 2, nrow = 1) 
 
+pcoa_ex2 <-  ggarrange(D22_ex2_final, DPI0_ex2_final, DPI2_ex2_final, DPI4_ex2_final, DPI7_ex2_final, leg_ex2, nrow = 2, ncol = 3) 
+
 pcoa_ex2
-ggsave('res_ex2/pcoa.png', plot = pcoa_ex2,device = 'png',width = 8, height = 6)
+#ggsave('res_ex2/pcoa.png', plot = pcoa_ex2,device = 'png',width = 8.6, height = 6)
 
 ```
 
@@ -342,10 +345,10 @@ ps.melt_ex2 <- ps.melt_ex2 %>%
 keep_ex2 <- unique(ps.melt_ex2$Phylum[ps.melt_ex2$median > 0.01])
 ps.melt_ex2$Phylum[!(ps.melt_ex2$Phylum %in% keep_ex2)] <- "Other phyla (< 1%)"
 
-rela_ex2_fecal <- ps.melt_ex2 %>% group_by(Treatment,time, Phylum) %>% summarise(Abundance=mean(Abundance)) 
+rela_ex2_fecal <- ps.melt_ex2 %>% group_by(Treatment,time, Phylum) %>% summarise(Abundance=mean(Abundance)) %>% filter(time != "Day7 (Pre-inoculation)")
 
 rela_ex2_fecal$time <- as.factor(rela_ex2_fecal$time)
-levels(rela_ex2_fecal$time) <- c("Day0 (Pre-inoculation)", "Day22", "Day40 (DPC0)","Day42 (DPC2)","Day44 (DPC4)","Day47 (DPC7)") # reorder
+levels(rela_ex2_fecal$time) <- time_levels # reorder
 
 ## create color palette for barplots
 mypalette <- c("#FF0000", "#FFDB00", "#1bbf06", "#42f5d7", "#0092FF", "#4900FF", "#FF00DB")
@@ -361,7 +364,8 @@ theme(strip.background = element_blank(),
         axis.text.x.bottom = element_text(angle = 90)) +
   facet_wrap(~time) +
   theme(legend.position = "none") +
-  theme(legend.direction="horizontal")
+  theme(legend.direction="horizontal") + 
+  labs(tag = "A")
 
 legend_abundance <- get_legend( ggplot(rela_ex2_fecal, aes(x = Treatment, y = Abundance, fill = Phylum)) + 
 geom_bar(stat = "identity", aes(fill=Phylum)) + 
@@ -378,7 +382,7 @@ barplot_ex2_fecal
 ## Digestive tract 
 ```{r}
 ## control filtered after rarefaction
-ps_dig <- ps.rarefied %>% subset_samples(type %in% c("Ileum", "Colon"))  
+ps_dig <- ps.rarefied %>% subset_samples(type %in% c("Ileum", "Colon", "BAL"))  
 rela_dig <- transform_sample_counts(ps_dig, function(x) x / sum(x) ) 
 
 dig_glom <- tax_glom(rela_dig, taxrank = 'Phylum', NArm = FALSE)
@@ -393,20 +397,21 @@ dig.melt <- dig.melt %>%
 keep_dig <- unique(dig.melt$Phylum[dig.melt$median > 0.01])
 dig.melt$Phylum[!(dig.melt$Phylum %in% keep_dig)] <- "Low abundance (< 1%)"
 
-rela_dig_ready <- dig.melt %>% group_by(Treatment,time, type, Phylum) %>% summarise(Abundance=mean(Abundance)) 
+rela_dig_ready <- dig.melt %>% group_by(Treatment,time, type, Phylum) %>% filter(time != "Day7 (Pre-inoculation)") %>% summarise(Abundance=mean(Abundance)) 
 
 rela_dig_ready$time <- as.factor(rela_dig_ready$time)
 
 
 barplot_dig_by_time <- ggplot(rela_dig_ready, aes(x = Treatment, y = Abundance, fill = Phylum)) + 
 geom_bar(stat = "identity", aes(fill=Phylum)) + 
-labs(x="", y="Intestinal microbiota") +
+labs(x="", y="Intestinal and BAL microbiota") +
 theme_classic() + 
   scale_fill_manual(values = mypalette) +
 theme(strip.background = element_blank(), 
         axis.text.x.bottom = element_text(angle = 90)) +
-  facet_wrap(~time + type) +
-  theme(legend.position = "none")
+  facet_wrap(~type + time) +
+  theme(legend.position = "none") + 
+  labs(tag = "C")
 barplot_dig_by_time
 
 
@@ -417,7 +422,7 @@ barplot_dig_by_time
 
 ## Respiration tract
 ```{r}
-ps_res <- ps.rarefied %>% subset_samples(type %in% c('Nasal', "BAL"))  
+ps_res <- ps.rarefied %>% subset_samples(type %in% c('Nasal'))  
 rela_res <- transform_sample_counts(ps_res, function(x) x / sum(x) ) 
 #nasal_filter <- filter_taxa(physeq = rela_nasal, function(x) sum(x>1e-4) >(0.10*length(x)) , TRUE) %>% transform_sample_counts( function(x) x / sum(x) ) 
 
@@ -433,21 +438,23 @@ res.melt <- res.melt %>%
 keep_res <- unique(res.melt$Phylum[res.melt$median > 0.01])
 res.melt$Phylum[!(res.melt$Phylum %in% keep_res)] <- "Low abundance (< 1%)"
 
-rela_res_ready <- res.melt %>% group_by(Treatment,time,type, Phylum) %>% summarise(Abundance=mean(Abundance)) 
+rela_res_ready <- res.melt %>% group_by(Treatment,time,type, Phylum) %>% filter(time != "Day7 (Pre-inoculation)") %>% summarise(Abundance=mean(Abundance)) 
 
-rela_res_ready$time <- as.factor(rela_res_ready$time)
-levels(rela_res_ready$time) <- c("Day0 (Pre-inoculation)","Day40 (DPC0)","Day42 (DPC2)","Day44 (DPC4)","Day47 (DPC7)", "Day22") # reorder
+rela_res_ready$time <- factor(rela_res_ready$time, level = time_levels)
+
 
 
 barplot_res_by_time <- ggplot(rela_res_ready, aes(x = Treatment, y = Abundance, fill = Phylum)) + 
 geom_bar(stat = "identity", aes(fill=Phylum)) + 
-labs(x="", y="Respiratory tissues microbiota") +
+labs(x="", y="Nasal mucosal microbiota") +
 theme_classic() + 
   scale_fill_manual(values = mypalette) +
 theme(strip.background = element_blank(), 
         axis.text.x.bottom = element_text(angle = 90)) +
-  facet_wrap(~time + type ) +
-  theme(legend.position = "none")
+  facet_wrap(~time ) +
+  theme(legend.position = "none") + 
+  labs(tag = "B")
+
 barplot_res_by_time 
 
 
@@ -460,11 +467,11 @@ barplot_res_by_time
 
 ## Arrange as single plot
 ```{r}
-phylum_abundance <- ggarrange(ggarrange(barplot_ex2_fecal, barplot_dig_by_time, barplot_res_by_time,  ncol = 1, nrow = 3, heights = c(1,1,1)),legend_abundance, heights = c(10, 1),
-          ncol = 1, nrow = 2)
+phylum_abundance <- ggarrange(ggarrange(barplot_ex2_fecal, barplot_res_by_time, barplot_dig_by_time,  ncol = 1, nrow = 3, heights = c(2,2.2, 1.4)),legend_abundance, heights = c(10, 1),
+          ncol = 1, nrow = 2) 
 
 phylum_abundance
-#ggsave('res_ex2/phylum_abundance.png', plot = phylum_abundance,device = 'png',width = 6, height = 12)
+ggsave('res_ex2/phylum_abundance.png', plot = phylum_abundance,device = 'png',width = 6, height = 12)
 ```
 
 
@@ -502,7 +509,7 @@ fecal_genus_sig$abundance <- fecal_genus_sig$abundance*100
  
 fecal_genus_sig$taxa <- str_replace_all(fecal_genus_sig$taxa, "Unclassified \\[Mogibacteriaceae\\]", "Unclassified Mogibacteriaceae") # formating
 # plot
-ancom_res <- ggplot(fecal_genus_sig, aes(x=Treatment, y=abundance,fill=Treatment)) +
+ancom_res <- ggplot(fecal_genus_sig, aes(x=Treatment, y=abundance)) +
   geom_boxplot()+ 
    facet_wrap(~taxa,scales= "free") + 
    labs(x = "", y = "Abundance (%)",
@@ -516,7 +523,7 @@ ancom_res <- ggplot(fecal_genus_sig, aes(x=Treatment, y=abundance,fill=Treatment
   theme(legend.position = c(0.85, 0.2))
 
 ancom_res
-ggsave('res_ex2/ancom.png', plot = ancom_res,device = 'png',width = 6, height = 4)
+#ggsave('res_ex2/ancom.png', plot = ancom_res,device = 'png',width = 6, height = 4)
 
 ```
 
@@ -660,18 +667,21 @@ corr_dig_for_heatmap <- corr_dig_for_heatmap %>%
 ```{r}
 
 corr_dig_for_heatmap$immu <- str_split_fixed(corr_dig_for_heatmap$immu, "MLN_", 2)[,2]
-replacement <- c("CD172" = "Myeloid Cells", "CD3$" = "Non-T cells", "T_helper" = "T-helper/memory cells", "T_cells" = "Cytotoxic T cells")
+replacement <- c("CD172" = "Myeloid Cells", "CD3$" = "Non-T cells (CD3-)", "T_helper" = "T-helper/memory cells", "T_cells" = "Cytotoxic T cells")
 corr_dig_for_heatmap$immu <- str_replace_all(corr_dig_for_heatmap$immu, replacement)
 # visualizing with complexheatmap package
 row_ha <- rowAnnotation( Immunology = corr_dig_for_heatmap$immu,
                          col = list(Immunology = c("Myeloid Cells" = "#ebc034", "Non-T cells" = "#34eb58", "T-helper/memory cells" = "#080808", "Cytotoxic T cells" = "#c73c9d"))
                          ) 
 
-heatmap_dig <- corr_dig_for_heatmap %>% select(-c(immu, microbiota)) %>% Heatmap(name = "r", 
+corr_dig_for_heatmap$order = 1:nrow(corr_dig_for_heatmap)
+
+heatmap_dig <- corr_dig_for_heatmap %>% select(-c(immu, microbiota, order)) %>% Heatmap(name = "r", 
                                                                   #left_annotation = row_ha, # annotation  
                                                                   row_split = corr_dig_for_heatmap$microbiota, # split colon and fecal 
                                                                   row_labels = corr_dig_for_heatmap$immu,
-                                                                  show_heatmap_legend = FALSE)
+                                                                  show_heatmap_legend = FALSE,
+                                                                  row_order = corr_dig_for_heatmap$order)
 
 # draw(heatmap_dig, heatmap_legend_side = "bottom", annotation_legend_side = "bottom") # adjust legend position
 heatmap_dig
@@ -686,24 +696,32 @@ corr_bal_r_matrix_pre[corr_bal_p[c("immu", sig_taxa_bal)] > 0.05] <- 0 # if not 
 corr_bal_r_matrix_pre <- corr_bal_r_matrix_pre %>% plyr::rename(c("[Ruminococcus]" =  "Ruminococcus"))
 
 # rename, for better visualization 
-corr_bal_r_matrix_row_rename <- c("Myeloid cells", "Non-T cells",
+corr_bal_r_matrix_row_rename <- c("Myeloid cells", "Non-T cells (CD3-)",
                                   "1 in 100", "1 in 1600", "1 in 200", "1 in 400", "1 in 50", "1 in 800",
                                    "1 in 100", "1 in 1600", "1 in 200", "1 in 400", "1 in 50", "1 in 800",
-                                  "Non-T cells", "Myeloid cells",
-                                  "T cells", "T helper/memory cells")
+                                  "Non-T cells (CD3-)", "Myeloid cells",
+                                  "Cytotoxic T cells", "T helper/memory cells")
 
 corr_bal_r_matrix_pre$immu <- corr_bal_r_matrix_row_rename
 
-corr_bal_r_matrix_pre$Cells <- c("BAL Cells Myloid Cells", "BAL Cells Myloid Cells", rep("lgA", 6), rep("lgG", 6), "TBLN MNCs Myloid cells", "TBLN MNCs Myloid cells", "TBLN MNCs Immune Cells", "TBLN MNCs Immune Cells")
+corr_bal_r_matrix_pre$Cells <- c("BAL Cells Myeloid Cells\n(include Non-T cells)", "BAL Cells Myeloid Cells\n(include Non-T cells)", rep("lgA (BAL Fluid)", 6), rep("lgG (BAL Fluid)", 6), "TBLN MNCs Myeloid cells\n(include Non-T cells)", "TBLN MNCs Myeloid cells\n(include Non-T cells)", "TBLN MNCs Immune Cells\n(include Cytotoxic T cells and T-helper/memory cells)", "TBLN MNCs Immune Cells\n(include Cytotoxic T cells and T-helper/memory cells)")
 
-corr_bal_r_matrix_pre <- corr_bal_r_matrix_pre %>% mutate(immu = as.character(immu)) %>%  arrange(Cells, nchar(immu))  # nchar()  
-corr_bal_r_matrix_pre$immu <- corr_bal_r_matrix_pre$immu %>% factor(levels = c("1 in 50", "1 in 100", "1 in 200", "1 in 400", "1 in 800", "1 in 1600", "Non-T cells", "Myeloid cells", "T cells", "T helper/memory cells"))
+corr_bal_r_matrix_pre <- corr_bal_r_matrix_pre %>% mutate(immu = as.character(immu)) %>%  arrange(Cells, nchar(immu)) %>% arrange(immu, Cells) %>% filter(immu %!in% c("1 in 100", "1 in 200", "1 in 400", "1 in 800", "1 in 1600"))  # decided only use lowest dilution value for corr
+
+corr_bal_r_matrix_pre$immu <- corr_bal_r_matrix_pre$immu %>% factor(levels = c("1 in 50", "Non-T cells (CD3-)", "Myeloid cells", "Cytotoxic T cells", "T helper/memory cells", "lgA (BAL Fluid)", "lgG (BAL Fluid)"))
 corr_bal_r_matrix_pre$order = 1:nrow(corr_bal_r_matrix_pre)
 
 
 row_ha_bal <- rowAnnotation(Cells = corr_bal_r_matrix_pre$Cells, 
-                             col = list(Cells = c("BAL Cells Myloid Cells" = "#ebc034", "lgA" = "#34eb58", "lgG" = "#080808", "TBLN MNCs Immune Cells" = "#c73c9d", "TBLN MNCs Myloid cells" = "#3c94c7")))                          
-heatmap_bal <- corr_bal_r_matrix_pre %>% ungroup() %>% select(-c(immu,  Cells, order)) %>% Heatmap(name = "r", row_split = corr_bal_r_matrix_pre$Cells, row_title = NULL, left_annotation = row_ha_bal, row_order = corr_bal_r_matrix_pre$order, row_labels = corr_bal_r_matrix_pre$immu)
+                             col = list(Cells = c("BAL Cells Myeloid Cells\n(include Non-T cells)" = "#ebc034", "lgA (BAL Fluid)" = "#34eb58", "lgG (BAL Fluid)" = "#080808", "TBLN MNCs Immune Cells\n(include Cytotoxic T cells and T-helper/memory cells)" = "#c73c9d", "TBLN MNCs Myeloid cells\n(include Non-T cells)" = "#3c94c7")))       
+
+corr_bal_r_matrix_pre[corr_bal_r_matrix_pre$Cells == "lgA (BAL Fluid)", "immu"] <- "lgA (BAL Fluid)"
+corr_bal_r_matrix_pre[corr_bal_r_matrix_pre$Cells == "lgG (BAL Fluid)", "immu"] <- "lgG (BAL Fluid)"
+
+
+heatmap_bal <- corr_bal_r_matrix_pre  %>% ungroup() %>%  
+  select(-c(immu,  Cells, order)) %>% 
+  Heatmap(name = "r", row_split = corr_bal_r_matrix_pre$Cells, row_title = NULL, left_annotation = row_ha_bal, row_labels = corr_bal_r_matrix_pre$immu)
 
 heatmap_bal_adjusted <- draw(heatmap_bal, heatmap_legend_side = "bottom", annotation_legend_side = "bottom", newpage = FALSE)
 ```
@@ -715,11 +733,11 @@ heatmap_bal_adjusted <- draw(heatmap_bal, heatmap_legend_side = "bottom", annota
 grob1 <-grid.grabExpr(draw(heatmap_dig, ))
 grob2 <-grid.grabExpr(draw(heatmap_bal_adjusted))
 
-heatmap_dig_ready <- annotate_figure(grob1, fig.lab = "(a)")
-heatmap_bal_ready <- annotate_figure(grob2, fig.lab = "(b)")
-corr_heatmap <- ggarrange(heatmap_dig_ready, heatmap_bal_ready, nrow = 2, heights = c(4,6))
+heatmap_dig_ready <- annotate_figure(grob1, fig.lab = "A", fig.lab.size = 12)
+heatmap_bal_ready <- annotate_figure(grob2, fig.lab = "B", fig.lab.size = 12)
+corr_heatmap <- ggarrange(heatmap_dig_ready, heatmap_bal_ready, nrow = 2, heights = c(4,5))
 
 
 
-ggsave('res_ex2/correlation.png', plot = corr_heatmap,device = 'png',width = 7, height = 12)
+#ggsave('res_ex2/correlation.png', plot = corr_heatmap,device = 'png',width = 6, height = 11)
 ```
